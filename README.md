@@ -8,3 +8,5 @@ This repository contains code for ACL 2024 paper: [Transferable Embedding Invers
     ```
     poetry install
     ```
+
+## The migration is still in progress. You may encounter unfinished features or bugs. I am actively working on improvements and will release updates shortly. Thank you for your patience!
