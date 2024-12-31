@@ -1,4 +1,5 @@
 '''Data preparation for training and testing.'''
+import os
 import pickle
 import torch
 import numpy as np
@@ -89,7 +90,8 @@ def prepare_external_data(config):
     external_sents = load_document(
         dataset=config['external_dataset'])['documents']
     external_sents = external_sents[:external_size]
-    external_embs = [0] * len(external_sents) # We don't need external embeddings
+    # We don't need external embeddings
+    external_embs = [0] * len(external_sents)
     external_dataset = DocDataset(external_sents, external_embs)
 
     return external_dataset
@@ -97,7 +99,9 @@ def prepare_external_data(config):
 
 def load_prepared_dataset(config):
     '''Load prepared dataset contains original data'''
-    with open(f"/data1/emb_attack/processed_data/{config['dataset']}_FullDataset.pkl", "rb") as dataset_f:
+    dataset_path = os.path.join(
+        config["dataset_root"], f"{config['dataset']}_FullDataset.pkl")
+    with open(dataset_path, "rb") as dataset_f:
         full_dataset = pickle.load(dataset_f)
 
     # Get dataset
@@ -127,6 +131,7 @@ def load_prepared_dataset(config):
 
     return remove_empty_docs(train_dataset), val_dataset
 
+
 def load_augmented_data(config, train_dataset):
     '''Load augmented data'''
     if config['option'] == 'None':
@@ -134,7 +139,9 @@ def load_augmented_data(config, train_dataset):
         return train_dataset
 
     print(f"Loading augmented data: {config['option']}")
-    with open(f"/data1/emb_attack/processed_data/{config['dataset']}_FullDataset_aug.pkl", "rb") as aug_f:
+    aug_dataset_path = os.path.join(
+        config["dataset_root"], f"{config['dataset']}_FullDataset_aug.pkl")
+    with open(aug_dataset_path, "rb") as aug_f:
         aug_dict = pickle.load(aug_f)
 
     sent_list, emb_list = [], []
@@ -148,6 +155,7 @@ def load_augmented_data(config, train_dataset):
             emb_list.append(emb)
 
     return DocDataset(sent_list, np.array(emb_list))
+
 
 def prepare_dataset(config, sent_list, doc_embs):
     '''Prepare train, val, test, and external dataset'''
@@ -207,7 +215,8 @@ def prepare_adv_additional_data(pivot_dataset, additional_dataset, surrogate, co
         adv_labels.append(0)
     for sents, embs in additional_dataset:
         adv_sents.append(sents)
-        adv_embs.append(adv_embs[0]) # This is just a fake one since additional data doesn't have private emb
+        # This is just a fake one since additional data doesn't have private emb
+        adv_embs.append(adv_embs[0])
         surrogate_embs.append(embs)
         adv_labels.append(1)
 

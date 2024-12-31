@@ -9,4 +9,11 @@ This repository contains code for ACL 2024 paper: [Transferable Embedding Invers
     poetry install
     ```
 
+## Prepare dataset
+Run the following command to generate dataset
+```
+python generate_fulldataset.py --dataset_name=[dataset_name] --dataset_root=[path_to_save_dataset]
+python generate_augdata.py --dataset_name=[dataset_name] --dataset_root=[path_to_save_aug_data]
+```
+
 ## The migration is still in progress. You may encounter unfinished features or bugs. I am actively working on improvements and will release updates shortly. Thank you for your patience!

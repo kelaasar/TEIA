@@ -14,6 +14,8 @@ def parse_argument():
                         default='microsoft/DialoGPT-small', help='Dir of your attack model')
     parser.add_argument('--dataset', type=str, default='qnli', choices=['qnli', 'personachat', 'IMDB', 'agnews', 'MIMC'],
                         help='Name of dataset')
+    parser.add_argument('--dataset_root', type=str, default='/data1/emb_attack/processed_data',
+                        help='Path to save preprocessing dataset')
     parser.add_argument('--external_dataset', type=str, default='personachat', choices=['qnli', 'personachat', 'IMDB', 'agnews'],
                         help='Name of external dataset')
     parser.add_argument('--surrogate_encoder', type=str, default='gtr-base',
@@ -25,7 +27,7 @@ def parse_argument():
     parser.add_argument('--geia', action='store_true',
                         help='Set this flag to use GEIA otherwise use AdvGEIA')
     parser.add_argument('--testing', action='store_true',
-                        help='Set this flag to test the model in mini batch.')
+                        help='Set this flag to test the model in mini batch')
 
     # Training parameters
     parser.add_argument('--train_ratio', type=float,
