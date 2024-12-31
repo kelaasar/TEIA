@@ -141,10 +141,11 @@ def calculate_metrics(pred: list[str], target: list[str]):
 
 
 def eval_generation(pred: list[str], target: list[str]):
-    '''Evaluate LLM evaluation'''''
+    '''LLM evaluation'''''
     remove_eos(pred)
     result = {}
-    result.update(llm_eval(pred, target))
+    if os.getenv("OPENAI_API_KEY") is not None:
+        result.update(llm_eval(pred, target))
     return result
 
 
