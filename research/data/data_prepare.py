@@ -146,6 +146,11 @@ def load_augmented_data(config, train_dataset):
 
     sent_list, emb_list = [], []
     for sent, emb in train_dataset:
+        # Make sure that the augmented data is not empty
+        if len(aug_dict[sent][config['option']]) == 0:
+            # Raise warning if the augmented data is empty
+            print(f"Augmented data is empty for {sent}")
+            continue
         sent_list.append(sent)
         emb_list.append(emb)
         for idx, aug_sent in enumerate(aug_dict[sent][config['option']]):
