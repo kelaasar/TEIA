@@ -16,10 +16,12 @@ wordnet_aug = WordNetAugmenter()
 def EDA(text, option, count):
     text = str(text)
     if option == "replace":
+        print("replace.")
         for _ in range(count):
             text = wordnet_aug.augment(text)[0]
         return text
     if option == "delete":
+        print("delete.")
         text_s = text.split()
         for _ in range(count):
             text_s.pop(random.randint(0, len(text_s)-1))
@@ -27,6 +29,7 @@ def EDA(text, option, count):
                 break
         return " ".join(text_s)
     if option == "swap":
+        print("swap.")
         text_s = text.split()
         index_list = list(np.arange(len(text_s)))
         for _ in range(count):
@@ -34,6 +37,7 @@ def EDA(text, option, count):
             text_s[num[0]], text_s[num[1]] = text_s[num[1]], text_s[num[0]]
         return " ".join(text_s)
     if option == "insert":
+        print("insert.")
         rw = RandomWords()
         text_s = text.split()
         for _ in range(count):
@@ -75,6 +79,7 @@ New sentence:
 
 def get_llm_aug(sentence):
     client = OpenAI()
+    print("LLM.")
 
     prompt = get_prompt(sentence)
 
@@ -126,24 +131,24 @@ if __name__ == '__main__':
                 FullDataset_aug[sent]["llm"].append(text_LLM)
         except:
             pass
-        for _ in range(5):
+        for _ in range(1):
             try:
-                text_insert = EDA(sent, "insert", 5)
+                text_insert = EDA(sent, "insert", 1)
                 FullDataset_aug[sent]["insert"].append(text_insert)
             except:
                 pass
             try:
-                text_delete = EDA(sent, "delete", 5)
+                text_delete = EDA(sent, "delete", 1)
                 FullDataset_aug[sent]["delete"].append(text_delete)
             except:
                 pass
             try:
-                text_replace = EDA(sent, "replace", 5)
+                text_replace = EDA(sent, "replace", 1)
                 FullDataset_aug[sent]["replace"].append(text_replace)
             except:
                 pass
             try:
-                text_swap = EDA(sent, "swap", 5)
+                text_swap = EDA(sent, "swap", 1)
                 FullDataset_aug[sent]["swap"].append(text_swap)
             except:
                 pass

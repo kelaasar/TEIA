@@ -57,8 +57,8 @@ def parse_argument():
 
     # Easy data augmentation
     parser.add_argument('--multiple', type=int,
-                        default=1, help='multiple of producing new data')
+                        default=5, help='multiple of producing new data')
     parser.add_argument('--option', type=str,
-                        default='llm', help='option for data augmentation', choices=['swap', 'insert', 'replace', 'delete', 'llm', 'None'])
+                        default='None', help='option for data augmentation', choices=['swap', 'insert', 'replace', 'delete', 'llm', 'None'])
 
     return parser.parse_args()
