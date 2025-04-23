@@ -14,7 +14,7 @@ def parse_argument():
                         default='microsoft/DialoGPT-small', help='Dir of your attack model')
     parser.add_argument('--dataset', type=str, default='qnli', choices=['qnli', 'personachat', 'IMDB', 'agnews', 'MIMC'],
                         help='Name of dataset')
-    parser.add_argument('--dataset_root', type=str, default='/data1/emb_attack/processed_data',
+    parser.add_argument('--dataset_root', type=str, default='data/emb_attack/processed_data', 
                         help='Path to save preprocessing dataset')
     parser.add_argument('--external_dataset', type=str, default='personachat', choices=['qnli', 'personachat', 'IMDB', 'agnews'],
                         help='Name of external dataset')
@@ -33,13 +33,13 @@ def parse_argument():
     parser.add_argument('--train_ratio', type=float,
                         default=0.1, help='Ratio of training data.')
     parser.add_argument('--training_size', type=int,
-                        default=8000, help='Count of training data.')
+                        default=30000, help='Count of training data.')
     parser.add_argument('--external_size', type=int,
-                        default=50000, help='Count of external data.')
+                        default=70000, help='Count of external data.')
     parser.add_argument('--surrogate_epoch', type=int,
                         default=10, help='Surrogate training epoches.')
     parser.add_argument('--num_epochs', type=int,
-                        default=24, help='Training epoches.')
+                        default=35, help='Training epoches.')
     parser.add_argument('--eval_per_epochs', type=int,
                         default=2, help='Evaluate per # epoches.')
     parser.add_argument('--batch_size', type=int,
@@ -57,7 +57,7 @@ def parse_argument():
 
     # Easy data augmentation
     parser.add_argument('--multiple', type=int,
-                        default=5, help='multiple of producing new data')
+                        default=1, help='multiple of producing new data')
     parser.add_argument('--option', type=str,
                         default='llm', help='option for data augmentation', choices=['swap', 'insert', 'replace', 'delete', 'llm', 'None'])
 
