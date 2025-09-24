@@ -67,13 +67,16 @@ class LLMAttackModel():
         self.config = config
         self.emb_dim = emb_dim
         self.device = device
+        
         # Decoder model
         self.model = AutoModelForCausalLM.from_pretrained(
             config['model_dir']).to(self.device)
+        
         self.tokenizer = AutoTokenizer.from_pretrained(
             config['model_dir'])
         self.projection = LinearProjection(
             in_num=self.emb_dim, out_num=self.model.config.hidden_size).to(self.device)
+            
         self.criterion = SequenceCrossEntropyLoss()
         self.optimizer = prepare_optimizer(self.model)
         self.optimizer.add_param_group(
@@ -88,6 +91,7 @@ class LLMAttackModel():
         self.bce_loss = torch.nn.BCELoss()
         self.mapping = MappingNetwork(emb2_dim, emb_dim).to(self.device)
         self.discriminator = Discriminator(emb_dim).to(self.device)
+        
         self.optimizer.add_param_group(
             {'params': self.mapping.parameters()}
         )
@@ -163,9 +167,10 @@ class LLMAttackModel():
                     f"Epoch:[{epoch+1}/{self.config['num_epochs']}], Train_loss: {train_loss.item()}, Train_perplexity: {train_perplexity}")
                 result['train/loss'] = train_loss.item()
                 result['train/perplexity'] = train_perplexity
+                result['epoch'] = epoch + 1
                 print(result)
                 if not self.config['testing']:
-                    wandb.log(result)
+                    wandb.log(result, step=step)
 
                 result_score.append(result)
                 self.save_models(step)
@@ -325,8 +330,9 @@ class LLMAttackModel():
         sent.append(prev_word)
 
         for _ in range(50):
-            # logits, past = model(prev_input, past=past)
-            logits, past = self.model(
+            # Use original model for generation to avoid DataParallel issues
+            model_for_generation = self._original_model if hasattr(self, '_original_model') else self.model
+            logits, past = model_for_generation(
                 prev_input, past_key_values=past, return_dict=False)
             logits = logits[:, -1, :] / temperature
             logits = torch.clamp(logits, min=-1e9, max=1e9)
@@ -415,7 +421,7 @@ class SurrogateModel(nn.Module):
                                 'e5-large':'intfloat/e5-large-v2',
                                 }
         if self.encoder != 'openai':
-            self.model = SentenceTransformer( self.encoder_mapping[self.encoder],device=self.device)
+            self.model = SentenceTransformer(self.encoder_mapping[self.encoder], device=self.device)
             self.output_dim = self.model.get_sentence_embedding_dimension()
 
     def forward(self, documents):
@@ -465,12 +471,16 @@ class SurrogateModel(nn.Module):
             for _, (corpus, embs) in enumerate(data_loader):
                 embs = embs.to(self.device)     # [batch_size, embedding_dim]
                 output = self.forward(corpus)  # [batch_size, embedding_dim]
-                loss = loss_func(embs, output)
+                
+                # Convert output to tensor if it's numpy array
+                if isinstance(output, np.ndarray):
+                    output = torch.tensor(output, dtype=embs.dtype, device=self.device, requires_grad=True)
+                
+                loss = loss_func(output, embs)
 
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
-
                 train_loss += loss.item()
 
             print(

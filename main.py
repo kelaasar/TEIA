@@ -86,8 +86,7 @@ if __name__ == '__main__':
     print('load data done')
 
     surrogate = SurrogateModel(config, device)
-    # surrogate.fit(train_loader)
-    print(f"Without pretrained surrogate model.")
+    surrogate.fit(train_loader)
 
     # Prepare pivot data
     pivot_dataset = prepare_pivot_data(train_dataset, surrogate)

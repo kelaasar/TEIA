@@ -14,7 +14,7 @@ def parse_argument():
                         default='microsoft/DialoGPT-small', help='Dir of your attack model')
     parser.add_argument('--dataset', type=str, default='qnli', choices=['qnli', 'personachat', 'IMDB', 'agnews', 'MIMC'],
                         help='Name of dataset')
-    parser.add_argument('--dataset_root', type=str, default='/data1/emb_attack/processed_data',
+    parser.add_argument('--dataset_root', type=str, default='./data/processed_data',
                         help='Path to save preprocessing dataset')
     parser.add_argument('--external_dataset', type=str, default='personachat', choices=['qnli', 'personachat', 'IMDB', 'agnews'],
                         help='Name of external dataset')

@@ -8,7 +8,11 @@ import warnings
 import pickle
 from tqdm.auto import trange, tqdm
 from openai import OpenAI
+from dotenv import load_dotenv
 warnings.filterwarnings("ignore")
+
+# Load environment variables from .env file
+load_dotenv()
 
 # EDA 
 wordnet_aug = WordNetAugmenter()
