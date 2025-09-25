@@ -1,3 +1,4 @@
+absl-py==2.3.1
 accelerate==1.10.1
 aiohappyeyeballs==2.6.1
 aiohttp==3.12.15
@@ -127,6 +128,7 @@ PyYAML==6.0.2
 random_word==1.0.13
 regex==2025.9.18
 requests==2.32.5
+rouge-score==0.1.2
 s3transfer==0.14.0
 safetensors==0.6.2
 scikit-learn==1.6.1
