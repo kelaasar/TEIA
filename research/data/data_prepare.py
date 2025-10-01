@@ -228,8 +228,10 @@ def prepare_adv_additional_data(pivot_dataset, additional_dataset, surrogate, co
     adv_train_dataset = AdvDataset(
         adv_sents, adv_embs, surrogate_embs, adv_labels)
 
+    # Limit samples to avoid infinite sampling - use training_size for number of samples
+    num_samples = min(len(adv_train_dataset), config.get('training_size', len(adv_train_dataset)))
     sampler = WeightedRandomSampler(
-        weights, len(adv_train_dataset), replacement=True)
+        weights, num_samples, replacement=True)
     return DataLoader(dataset=adv_train_dataset,
                       batch_size=config['batch_size'],
                       sampler=sampler)
@@ -267,8 +269,10 @@ def prepare_additional_data(train_dataset, additional_dataset, surrogate, config
     weights = [len(additional_dataset)] * len(train_dataset) + \
         [len(train_dataset)] * len(additional_dataset)
     train_dataset = ConcatDataset([train_dataset, additional_dataset])
+    # Limit samples to avoid infinite sampling
+    num_samples = min(len(train_dataset), config.get('training_size', len(train_dataset)))
     sampler = WeightedRandomSampler(
-        weights, len(train_dataset), replacement=True)
+        weights, num_samples, replacement=True)
     return DataLoader(dataset=train_dataset,
                       batch_size=config['batch_size'],
                       sampler=sampler)

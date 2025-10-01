@@ -13,34 +13,174 @@ from research.utils.eval import calculate_metrics
 from research.utils.toolbox import create_save_path, create_save_dir_path
 from research.data.data_processing import get_document_embs
 from sentence_transformers import SentenceTransformer
+import torch.nn.functional as F
 
 
 class LinearProjection(nn.Module):
-    '''Linear projection layer to project the embedding to the same dim as LM'''
+    '''Enhanced projection layer with multiple architecture options'''
 
-    def __init__(self, in_num, out_num):
+    def __init__(self, in_num, out_num, use_deep=False, dropout_rate=0.1, architecture='simple'):
         super().__init__()
-        self.fc1 = nn.Linear(in_num, out_num)
+        self.use_deep = use_deep
+        self.architecture = architecture
+        
+        if architecture == 'residual':
+            # Residual connection network
+            hidden_dim = max(in_num, out_num)
+            self.projection = ResidualProjection(in_num, hidden_dim, out_num, dropout_rate)
+        elif architecture == 'transformer':
+            # Transformer-based projection
+            self.projection = TransformerProjection(in_num, out_num, dropout_rate)
+        elif architecture == 'deep':
+            # Multi-layer projection for better information preservation
+            hidden_dim = max(in_num, out_num)
+            self.projection = nn.Sequential(
+                nn.Linear(in_num, hidden_dim),
+                nn.LayerNorm(hidden_dim),
+                nn.GELU(),
+                nn.Dropout(dropout_rate),
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.LayerNorm(hidden_dim),
+                nn.GELU(),
+                nn.Dropout(dropout_rate),
+                nn.Linear(hidden_dim, out_num)
+            )
+        else:
+            # Simple linear projection (original)
+            self.projection = nn.Linear(in_num, out_num)
 
     def forward(self, embs):
         '''Forward the embedding to the projection layer'''
-        return torch.clamp(self.fc1(embs), min=-1e9, max=1e9)
+        projected = self.projection(embs)
+        return torch.clamp(projected, min=-1e6, max=1e6)
+
+
+class ResidualProjection(nn.Module):
+    '''Residual projection network for better gradient flow'''
+    
+    def __init__(self, in_num, hidden_dim, out_num, dropout_rate=0.1):
+        super().__init__()
+        self.input_proj = nn.Linear(in_num, hidden_dim)
+        self.residual_blocks = nn.ModuleList([
+            ResidualBlock(hidden_dim, dropout_rate) for _ in range(3)
+        ])
+        self.output_proj = nn.Linear(hidden_dim, out_num)
+        self.norm = nn.LayerNorm(hidden_dim)
+        
+    def forward(self, x):
+        x = self.input_proj(x)
+        x = self.norm(x)
+        
+        for block in self.residual_blocks:
+            x = block(x)
+            
+        return self.output_proj(x)
+
+
+class ResidualBlock(nn.Module):
+    '''Individual residual block'''
+    
+    def __init__(self, dim, dropout_rate=0.1):
+        super().__init__()
+        self.layer1 = nn.Linear(dim, dim)
+        self.layer2 = nn.Linear(dim, dim)
+        self.norm1 = nn.LayerNorm(dim)
+        self.norm2 = nn.LayerNorm(dim)
+        self.dropout = nn.Dropout(dropout_rate)
+        self.activation = nn.GELU()
+        
+    def forward(self, x):
+        residual = x
+        x = self.norm1(x)
+        x = self.activation(self.layer1(x))
+        x = self.dropout(x)
+        x = self.layer2(x)
+        x = self.dropout(x)
+        return self.norm2(x + residual)
+
+
+class TransformerProjection(nn.Module):
+    '''Transformer-based projection using attention mechanisms'''
+    
+    def __init__(self, in_num, out_num, dropout_rate=0.1):
+        super().__init__()
+        hidden_dim = max(in_num, out_num)
+        
+        self.input_proj = nn.Linear(in_num, hidden_dim)
+        self.transformer_layer = nn.TransformerEncoderLayer(
+            d_model=hidden_dim,
+            nhead=8,
+            dim_feedforward=hidden_dim * 2,
+            dropout=dropout_rate,
+            batch_first=True
+        )
+        self.transformer = nn.TransformerEncoder(self.transformer_layer, num_layers=2)
+        self.output_proj = nn.Linear(hidden_dim, out_num)
+        
+    def forward(self, x):
+        # Add sequence dimension for transformer
+        x = self.input_proj(x).unsqueeze(1)  # [batch, 1, hidden]
+        x = self.transformer(x)
+        x = x.squeeze(1)  # [batch, hidden]
+        return self.output_proj(x)
 
 
 class MappingNetwork(nn.Module):
-    '''Define the mapping networks to map embeddings into a common space'''
+    '''Enhanced mapping networks with multiple architecture options'''
 
-    def __init__(self, input_dim, output_dim):
+    def __init__(self, input_dim, output_dim, architecture='simple'):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(input_dim, (input_dim + output_dim) // 2),
-            nn.ReLU(),
-            nn.Linear((input_dim + output_dim) // 2, output_dim)
-        )
+        self.architecture = architecture
+        
+        if architecture == 'deep':
+            # Deeper mapping network
+            hidden1 = max(input_dim, output_dim)
+            hidden2 = (input_dim + output_dim) // 2
+            self.net = nn.Sequential(
+                nn.Linear(input_dim, hidden1),
+                nn.LayerNorm(hidden1),
+                nn.GELU(),
+                nn.Dropout(0.1),
+                nn.Linear(hidden1, hidden2),
+                nn.LayerNorm(hidden2),
+                nn.GELU(),
+                nn.Dropout(0.1),
+                nn.Linear(hidden2, output_dim)
+            )
+        elif architecture == 'residual':
+            # Residual mapping network
+            self.net = ResidualMapping(input_dim, output_dim)
+        else:
+            # Simple mapping network (original)
+            self.net = nn.Sequential(
+                nn.Linear(input_dim, (input_dim + output_dim) // 2),
+                nn.ReLU(),
+                nn.Linear((input_dim + output_dim) // 2, output_dim)
+            )
 
     def forward(self, embs):
         '''Forward the embedding to the mapping network'''
         return self.net(embs.float())
+
+
+class ResidualMapping(nn.Module):
+    '''Residual mapping network for better information preservation'''
+    
+    def __init__(self, input_dim, output_dim):
+        super().__init__()
+        hidden_dim = max(input_dim, output_dim)
+        
+        self.input_proj = nn.Linear(input_dim, hidden_dim)
+        self.residual_blocks = nn.ModuleList([
+            ResidualBlock(hidden_dim) for _ in range(2)
+        ])
+        self.output_proj = nn.Linear(hidden_dim, output_dim)
+        
+    def forward(self, x):
+        x = self.input_proj(x)
+        for block in self.residual_blocks:
+            x = block(x)
+        return self.output_proj(x)
 
 
 class Discriminator(nn.Module):
@@ -60,6 +200,80 @@ class Discriminator(nn.Module):
         return self.net(embs)
 
 
+class ContrastiveLoss(nn.Module):
+    '''Contrastive loss for better embedding mapping'''
+    
+    def __init__(self, margin=1.0, temperature=0.1):
+        super().__init__()
+        self.margin = margin
+        self.temperature = temperature
+        
+    def forward(self, emb1, emb2, labels=None):
+        '''
+        emb1, emb2: embeddings to compare
+        labels: 1 for positive pairs, 0 for negative pairs
+        '''
+        if labels is None:
+            # Assume all pairs are positive (same semantic content)
+            labels = torch.ones(emb1.size(0), device=emb1.device)
+            
+        distances = F.pairwise_distance(emb1, emb2)
+        
+        positive_loss = labels * torch.pow(distances, 2)
+        negative_loss = (1 - labels) * torch.pow(torch.clamp(self.margin - distances, min=0.0), 2)
+        
+        return torch.mean(positive_loss + negative_loss)
+
+
+class TripletLoss(nn.Module):
+    '''Triplet loss for embedding alignment'''
+    
+    def __init__(self, margin=1.0):
+        super().__init__()
+        self.margin = margin
+        
+    def forward(self, anchor, positive, negative):
+        '''
+        anchor: original embeddings
+        positive: mapped embeddings (should be close to anchor)
+        negative: random embeddings (should be far from anchor)
+        '''
+        pos_dist = F.pairwise_distance(anchor, positive)
+        neg_dist = F.pairwise_distance(anchor, negative)
+        
+        loss = torch.clamp(pos_dist - neg_dist + self.margin, min=0.0)
+        return torch.mean(loss)
+
+
+class InfoNCELoss(nn.Module):
+    '''InfoNCE loss for contrastive learning'''
+    
+    def __init__(self, temperature=0.1):
+        super().__init__()
+        self.temperature = temperature
+        
+    def forward(self, query, positive, negatives):
+        '''
+        query: anchor embeddings
+        positive: positive embeddings 
+        negatives: negative embeddings
+        '''
+        # Normalize embeddings
+        query = F.normalize(query, dim=-1)
+        positive = F.normalize(positive, dim=-1)
+        negatives = F.normalize(negatives, dim=-1)
+        
+        # Compute similarities
+        pos_sim = torch.sum(query * positive, dim=-1) / self.temperature
+        neg_sim = torch.matmul(query, negatives.transpose(-2, -1)) / self.temperature
+        
+        # Compute InfoNCE loss
+        logits = torch.cat([pos_sim.unsqueeze(-1), neg_sim], dim=-1)
+        labels = torch.zeros(query.size(0), dtype=torch.long, device=query.device)
+        
+        return F.cross_entropy(logits, labels)
+
+
 class LLMAttackModel():
     '''LM based attack model'''
 
@@ -74,23 +288,40 @@ class LLMAttackModel():
         
         self.tokenizer = AutoTokenizer.from_pretrained(
             config['model_dir'])
+        
+        # Enhanced projection with architecture selection
+        proj_arch = config.get('projection_architecture', 'simple')
         self.projection = LinearProjection(
-            in_num=self.emb_dim, out_num=self.model.config.hidden_size).to(self.device)
+            in_num=self.emb_dim, out_num=self.model.config.hidden_size, 
+            use_deep=config.get('use_deep_projection', False),
+            architecture=proj_arch).to(self.device)
             
         self.criterion = SequenceCrossEntropyLoss()
         self.optimizer = prepare_optimizer(self.model)
         self.optimizer.add_param_group(
             {'params': self.projection.parameters()}
         )
+        
+        # Add embedding consistency loss
+        self.victim_model = SentenceTransformer(
+            'sentence-transformers/all-mpnet-base-v2', device=self.device)
+        self.embedding_consistency_weight = config.get('embedding_consistency_weight', 0.5)
 
         # Pivot training
         self.mse_loss = torch.nn.MSELoss()
         self.pairwise_pivot_loss = PairwisePivotLoss()
 
-        # Adversarial training
+        # Adversarial training with enhanced mapping
         self.bce_loss = torch.nn.BCELoss()
-        self.mapping = MappingNetwork(emb2_dim, emb_dim).to(self.device)
+        mapping_arch = config.get('mapping_architecture', 'simple')
+        self.mapping = MappingNetwork(emb2_dim, emb_dim, architecture=mapping_arch).to(self.device)
         self.discriminator = Discriminator(emb_dim).to(self.device)
+        
+        # Advanced loss functions
+        self.contrastive_loss = ContrastiveLoss(margin=1.0, temperature=0.1)
+        self.triplet_loss = TripletLoss(margin=1.0)
+        self.infonce_loss = InfoNCELoss(temperature=0.1)
+        self.loss_type = config.get('loss_type', 'standard')  # 'standard', 'contrastive', 'triplet', 'infonce'
         
         self.optimizer.add_param_group(
             {'params': self.mapping.parameters()}
@@ -153,7 +384,10 @@ class LLMAttackModel():
                 else:
                     train_loss, train_perplexity = self.train_on_batch(
                         embeddings=self.projection(emb1), text=text1)
-                    loss = train_loss
+                    
+                    # Add embedding consistency loss during GEIA training
+                    embed_consistency_loss = self.compute_embedding_consistency_loss(emb1, text1)
+                    loss = train_loss + self.embedding_consistency_weight * embed_consistency_loss
 
                 self.optimizer.zero_grad()
                 loss.backward(retain_graph=True)
@@ -178,11 +412,116 @@ class LLMAttackModel():
 
         return result_score
 
+    def compute_embedding_consistency_loss(self, embeddings, texts):
+        '''Compute embedding consistency loss by comparing reconstructed vs original embeddings'''
+        with torch.no_grad():
+            # Generate sentences from embeddings
+            projected_embs = self.projection(embeddings)
+            reconstructed_texts = []
+            
+            for hidden in projected_embs:
+                # Quick reconstruction without full generation
+                recon_text = self.generate_sentence_fast(hidden.unsqueeze(0))
+                reconstructed_texts.append(recon_text)
+            
+            # Get embeddings of reconstructed texts
+            if reconstructed_texts and any(text.strip() for text in reconstructed_texts):
+                recon_embeddings = torch.tensor(
+                    self.victim_model.encode(reconstructed_texts, convert_to_tensor=False),
+                    device=self.device, dtype=embeddings.dtype
+                )
+                
+                # Cosine similarity loss (encourage higher similarity)
+                cos_sim = torch.nn.functional.cosine_similarity(embeddings, recon_embeddings, dim=1)
+                # Convert to loss (1 - similarity, so minimizing increases similarity)
+                consistency_loss = 1.0 - cos_sim.mean()
+                return consistency_loss
+            else:
+                return torch.tensor(0.0, device=self.device)
+    
+    def generate_sentence_fast(self, hidden_embedding, max_length=20):
+        '''Fast sentence generation for consistency loss (shorter sequences)'''
+        temperature = 0.7  # Lower temperature for more focused generation
+        sent = []
+        past = None
+        eos = self.tokenizer.encode("<|endoftext|>")
+        
+        hidden_embedding = hidden_embedding.unsqueeze(0)  # [1,1,embed_dim]
+        logits, past = self.model(inputs_embeds=hidden_embedding,
+                                  past_key_values=past, return_dict=False)
+        logits = logits[:, -1, :] / temperature
+        logits = torch.clamp(logits, min=-1e9, max=1e9)
+        probs = torch.softmax(logits, dim=-1)
+
+        prev_input = torch.multinomial(probs, num_samples=1)
+        prev_word = prev_input.item()
+        sent.append(prev_word)
+
+        for _ in range(max_length):
+            logits, past = self.model(prev_input, past_key_values=past, return_dict=False)
+            logits = logits[:, -1, :] / temperature
+            logits = torch.clamp(logits, min=-1e9, max=1e9)
+            probs = torch.softmax(logits, dim=-1)
+
+            prev_input = torch.multinomial(probs, num_samples=1)
+            prev_word = prev_input.item()
+
+            if prev_word == eos[0]:
+                break
+            sent.append(prev_word)
+
+        return self.tokenizer.decode(sent).replace('<|endoftext|>', '').strip()
+
     def pivot_on_batch(self, emb1, emb2):
-        '''Calculate two kinds of pivot losses'''
+        '''Calculate pivot losses with advanced loss functions'''
+        if self.loss_type == 'contrastive':
+            # Use contrastive loss (positive pairs)
+            labels = torch.ones(emb1.size(0), device=self.device)
+            contrastive = self.contrastive_loss(emb1, emb2, labels)
+            pairwise_loss = self.pairwise_pivot_loss(emb1, emb2)
+            return contrastive + 0.5 * pairwise_loss
+            
+        elif self.loss_type == 'triplet':
+            # Create negative samples by shuffling embeddings
+            batch_size = emb1.size(0)
+            indices = torch.randperm(batch_size, device=self.device)
+            negative = emb1[indices]
+            
+            triplet = self.triplet_loss(emb1, emb2, negative)
+            pairwise_loss = self.pairwise_pivot_loss(emb1, emb2)
+            return triplet + 0.3 * pairwise_loss
+            
+        elif self.loss_type == 'infonce':
+            # Use InfoNCE loss
+            batch_size = emb1.size(0)
+            if batch_size > 1:
+                # Create negatives from other samples in batch
+                negatives = []
+                for i in range(batch_size):
+                    neg_indices = [j for j in range(batch_size) if j != i]
+                    if neg_indices:
+                        neg_sample = emb1[neg_indices]
+                        negatives.append(neg_sample)
+                
+                if negatives:
+                    # Pad negatives to same size
+                    max_negs = max(neg.size(0) for neg in negatives)
+                    padded_negs = []
+                    for neg in negatives:
+                        if neg.size(0) < max_negs:
+                            padding = max_negs - neg.size(0)
+                            pad_neg = torch.cat([neg, neg[:padding]], dim=0)
+                            padded_negs.append(pad_neg)
+                        else:
+                            padded_negs.append(neg[:max_negs])
+                    
+                    negatives_tensor = torch.stack(padded_negs, dim=0)
+                    infonce = self.infonce_loss(emb1, emb2, negatives_tensor)
+                    return infonce + 0.2 * self.mse_loss(emb1, emb2)
+        
+        # Standard loss (fallback)
         same_pair_loss = self.mse_loss(emb1, emb2)
         pairwise_loss = self.pairwise_pivot_loss(emb1, emb2)
-
         return same_pair_loss + pairwise_loss
 
     def discriminator_on_epoch(self, emb1, emb2):
@@ -307,10 +646,12 @@ class LLMAttackModel():
         return sent_list, gt_list
 
     def generate_sentence(self, hidden_embedding):
-        '''Generate sentence using LLM'''
-        temperature = 0.9
+        '''Generate sentence using LLM with optimized parameters'''
+        # Better generation parameters for higher embedding similarity
+        temperature = 0.6  # Lower temperature for more focused generation
         top_k = -1
-        top_p = 0.9
+        top_p = 0.8  # More restrictive nucleus sampling
+        max_length = 35  # Shorter sequences tend to have better similarity
         sent = []
         prev_input = None
         past = None
@@ -329,7 +670,7 @@ class LLMAttackModel():
         prev_word = prev_input.item()
         sent.append(prev_word)
 
-        for _ in range(50):
+        for _ in range(max_length):
             # Use original model for generation to avoid DataParallel issues
             model_for_generation = self._original_model if hasattr(self, '_original_model') else self.model
             logits, past = model_for_generation(
@@ -461,14 +802,29 @@ class SurrogateModel(nn.Module):
         return self.forward(documents)
 
     def fit(self, data_loader):
-        '''Training to make surrogate model act like black box encoder'''
-        print(f"Training surrogate model on {self.encoder} encoder")
+        '''Enhanced training to make surrogate model act like black box encoder'''
+        print(f"Training enhanced surrogate model on {self.encoder} encoder")
         self.train()
-        loss_func = torch.nn.MSELoss()
-        optimizer = torch.optim.AdamW(self.parameters())
+        
+        # Enhanced loss functions for better embedding quality
+        mse_loss = torch.nn.MSELoss()
+        cosine_loss = torch.nn.CosineEmbeddingLoss(margin=0.0)
+        contrastive_loss = ContrastiveLoss(margin=1.0, temperature=0.1)
+        
+        # Better optimizer with learning rate scheduling
+        optimizer = torch.optim.AdamW(self.parameters(), lr=1e-4, weight_decay=0.01)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=self.config['surrogate_epoch'])
+        
+        best_loss = float('inf')
+        patience = 3
+        patience_counter = 0
+        
         for epoch in range(self.config['surrogate_epoch']):
             train_loss = 0
-            for _, (corpus, embs) in enumerate(data_loader):
+            mse_total = 0
+            cosine_total = 0
+            
+            for batch_idx, (corpus, embs) in enumerate(data_loader):
                 embs = embs.to(self.device)     # [batch_size, embedding_dim]
                 output = self.forward(corpus)  # [batch_size, embedding_dim]
                 
@@ -476,13 +832,114 @@ class SurrogateModel(nn.Module):
                 if isinstance(output, np.ndarray):
                     output = torch.tensor(output, dtype=embs.dtype, device=self.device, requires_grad=True)
                 
-                loss = loss_func(output, embs)
-
+                # Normalize embeddings for better cosine similarity
+                embs_norm = torch.nn.functional.normalize(embs, p=2, dim=1)
+                output_norm = torch.nn.functional.normalize(output, p=2, dim=1)
+                
+                # Multi-objective loss: MSE + Cosine + Contrastive + L1 regularization
+                mse = mse_loss(output_norm, embs_norm)  # Normalized MSE
+                
+                # Cosine similarity loss (want high similarity = low loss)
+                target_labels = torch.ones(embs.size(0), device=self.device)
+                cosine = cosine_loss(output_norm, embs_norm, target_labels)
+                
+                # Contrastive loss for better alignment
+                contrastive = contrastive_loss(output_norm, embs_norm, target_labels)
+                
+                # L1 regularization to prevent overfitting
+                l1_reg = sum(param.abs().sum() for param in self.parameters()) * 1e-6
+                
+                # Combined loss with optimized weights
+                loss = 0.5 * mse + 0.2 * cosine + 0.3 * contrastive + l1_reg
+                
                 optimizer.zero_grad()
                 loss.backward()
+                
+                # Gradient clipping for stability
+                torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)
+                
                 optimizer.step()
+                
                 train_loss += loss.item()
-
-            print(
-                f"Epoch[{epoch+1}/{self.config['surrogate_epoch']}] \
-                    Encoder loss:{train_loss / len(data_loader)}\n")
+                mse_total += mse.item()
+                cosine_total += cosine.item()
+            
+            scheduler.step()
+            avg_loss = train_loss / len(data_loader)
+            avg_mse = mse_total / len(data_loader)
+            avg_cosine = cosine_total / len(data_loader)
+            
+            print(f"Epoch[{epoch+1}/{self.config['surrogate_epoch']}] "
+                  f"Total Loss: {avg_loss:.6f}, MSE: {avg_mse:.6f}, "
+                  f"Cosine: {avg_cosine:.6f}, LR: {scheduler.get_last_lr()[0]:.2e}")
+            
+            # Early stopping based on loss improvement
+            if avg_loss < best_loss:
+                best_loss = avg_loss
+                patience_counter = 0
+                # Save best model state
+                self.best_state = {k: v.clone() for k, v in self.state_dict().items()}
+            else:
+                patience_counter += 1
+                if patience_counter >= patience and epoch > self.config['surrogate_epoch'] // 2:
+                    print(f"Early stopping at epoch {epoch+1} due to no improvement")
+                    # Load best state
+                    if hasattr(self, 'best_state'):
+                        self.load_state_dict(self.best_state)
+                    break
+        
+        print(f"✅ Enhanced surrogate training complete. Best loss: {best_loss:.6f}")
+        
+        # Evaluate surrogate quality on training data
+        self.evaluate_surrogate_quality(data_loader)
+    
+    def evaluate_surrogate_quality(self, data_loader, num_samples=100):
+        '''Evaluate surrogate model quality with similarity metrics'''
+        self.eval()
+        similarities = []
+        mse_scores = []
+        
+        with torch.no_grad():
+            sample_count = 0
+            for _, (corpus, embs) in enumerate(data_loader):
+                if sample_count >= num_samples:
+                    break
+                    
+                embs = embs.to(self.device)
+                output = self.forward(corpus)
+                
+                if isinstance(output, np.ndarray):
+                    output = torch.tensor(output, dtype=embs.dtype, device=self.device)
+                
+                # Normalize for cosine similarity
+                embs_norm = torch.nn.functional.normalize(embs, p=2, dim=1)
+                output_norm = torch.nn.functional.normalize(output, p=2, dim=1)
+                
+                # Calculate cosine similarities
+                cos_sim = torch.nn.functional.cosine_similarity(embs_norm, output_norm, dim=1)
+                similarities.extend(cos_sim.cpu().tolist())
+                
+                # Calculate MSE
+                mse = torch.nn.functional.mse_loss(embs_norm, output_norm, reduction='none').mean(dim=1)
+                mse_scores.extend(mse.cpu().tolist())
+                
+                sample_count += embs.size(0)
+        
+        avg_similarity = np.mean(similarities)
+        avg_mse = np.mean(mse_scores)
+        
+        print(f"📊 Surrogate Quality Metrics:")
+        print(f"   Average Cosine Similarity: {avg_similarity:.4f}")
+        print(f"   Average MSE: {avg_mse:.6f}")
+        print(f"   Similarity Std: {np.std(similarities):.4f}")
+        
+        if avg_similarity > 0.85:
+            print("🟢 Excellent surrogate quality!")
+        elif avg_similarity > 0.75:
+            print("🟡 Good surrogate quality")
+        elif avg_similarity > 0.65:
+            print("🟠 Moderate surrogate quality - consider more training")
+        else:
+            print("🔴 Poor surrogate quality - needs improvement")
+        
+        self.train()  # Switch back to training mode

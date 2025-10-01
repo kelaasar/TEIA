@@ -18,7 +18,7 @@ def parse_argument():
                         help='Path to save preprocessing dataset')
     parser.add_argument('--external_dataset', type=str, default='personachat', choices=['qnli', 'personachat', 'IMDB', 'agnews'],
                         help='Name of external dataset')
-    parser.add_argument('--surrogate_encoder', type=str, default='gtr-base',
+    parser.add_argument('--surrogate_encoder', type=str, default='sbert',
                         help='Name of surrogate encoder')
     parser.add_argument('--external_encoder', type=str, default='st5',
                         help='Name of external encoder for external data')
@@ -37,13 +37,13 @@ def parse_argument():
     parser.add_argument('--external_size', type=int,
                         default=50000, help='Count of external data.')
     parser.add_argument('--surrogate_epoch', type=int,
-                        default=10, help='Surrogate training epoches.')
+                        default=20, help='Enhanced surrogate training epoches (increased for better quality).')
     parser.add_argument('--num_epochs', type=int,
                         default=24, help='Training epoches.')
     parser.add_argument('--eval_per_epochs', type=int,
                         default=2, help='Evaluate per # epoches.')
     parser.add_argument('--batch_size', type=int,
-                        default=16, help='Batch_size #.')
+                        default=32, help='Batch_size #.')
     parser.add_argument('--mapping_lambda', type=float,
                         default=1.0, help='Lambda for mapping loss.')
     parser.add_argument('--pivot_lambda', type=float,
@@ -60,5 +60,22 @@ def parse_argument():
                         default=5, help='multiple of producing new data')
     parser.add_argument('--option', type=str,
                         default='llm', help='option for data augmentation', choices=['swap', 'insert', 'replace', 'delete', 'llm', 'None'])
+    
+    # Enhanced training parameters for better embedding similarity
+    parser.add_argument('--use_deep_projection', action='store_true', default=False,
+                        help='Use deeper projection network for better information preservation')
+    parser.add_argument('--embedding_consistency_weight', type=float, default=0.5,
+                        help='Weight for embedding consistency loss to improve reconstruction quality')
+    
+    # Advanced architecture options
+    parser.add_argument('--projection_architecture', type=str, default='simple',
+                        choices=['simple', 'deep', 'residual', 'transformer'],
+                        help='Architecture type for projection network')
+    parser.add_argument('--mapping_architecture', type=str, default='simple',
+                        choices=['simple', 'deep', 'residual'],
+                        help='Architecture type for mapping network')
+    parser.add_argument('--loss_type', type=str, default='standard',
+                        choices=['standard', 'contrastive', 'triplet', 'infonce'],
+                        help='Type of loss function to use for pivot training')
 
     return parser.parse_args()

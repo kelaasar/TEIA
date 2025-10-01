@@ -12,17 +12,75 @@ from sklearn.metrics.pairwise import cosine_similarity
 from sentence_transformers import SentenceTransformer
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from research.model.adv_attack_model import LinearProjection
 from research.utils.generation import top_filtering
+import torch.nn as nn
+
+
+class LinearProjection(nn.Module):
+    '''Compatible projection layer for loading saved models'''
+    
+    def __init__(self, in_num, out_num):
+        super().__init__()
+        # Use fc1 to match saved model structure
+        self.fc1 = nn.Linear(in_num, out_num)
+
+    def forward(self, embs):
+        '''Forward the embedding to the projection layer'''
+        projected = self.fc1(embs)
+        return torch.clamp(projected, min=-1e6, max=1e6)
+
+
+# =============================================================================
+# MODEL CONFIGURATION - CHANGE THESE TO SWITCH BETWEEN DIFFERENT TRAINED MODELS
+# =============================================================================
+
+# Available trained models:
+MODEL_CONFIGS = {
+    # Original small model (epoch 4 performance)
+    "old_small": {
+        "exp_name": "full_run_1",
+        "model_step": 1,  # Step 1 was best (epoch 2)
+        "training_size": "8000",
+        "base_model": "microsoft/DialoGPT-small",
+        "description": "Original DialoGPT-small, 8K samples, epoch 2"
+    },
+    
+    # New improved medium model 
+    "new_medium": {
+        "exp_name": "dialogpt_medium_32k_bs32_nepoch18", 
+        "model_step": 2,  # Step 2 was best (epoch 3) 
+        "training_size": "32000",
+        "base_model": "microsoft/DialoGPT-medium",
+        "description": "Improved DialoGPT-medium, 32K samples, epoch 3"
+    }
+}
+
+# SELECT WHICH MODEL TO USE:
+ACTIVE_MODEL = "new_medium"  # Change this to switch models
+
+# =============================================================================
 
 
 class TEIAQuerySystem:
-    def __init__(self, exp_name: str = "full_run_1", model_step: int = 1):
+    def __init__(self, model_config_name: str = None):
         """Initialize the TEIA query system"""
-        self.exp_name = exp_name
-        self.model_step = model_step
+        # Use active model config if none specified
+        config_name = model_config_name or ACTIVE_MODEL
+        
+        if config_name not in MODEL_CONFIGS:
+            raise ValueError(f"Unknown model config: {config_name}. Available: {list(MODEL_CONFIGS.keys())}")
+        
+        self.config = MODEL_CONFIGS[config_name]
+        self.exp_name = self.config["exp_name"]
+        self.model_step = self.config["model_step"]
+        self.training_size = self.config["training_size"]
+        self.base_model = self.config["base_model"]
+        
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.models_loaded = False
+        
+        print(f"🎯 Using model config: {config_name}")
+        print(f"📋 {self.config['description']}")
 
     def load_models(self):
         if self.models_loaded:
@@ -38,11 +96,11 @@ class TEIAQuerySystem:
         )
 
         # DialoGPT attack model
-        print("🤖 Loading DialoGPT attack model...")
+        print(f"🤖 Loading {self.base_model} attack model...")
         self.attack_model = AutoModelForCausalLM.from_pretrained(
-            'microsoft/DialoGPT-small'
+            self.base_model
         ).to(self.device)
-        self.tokenizer = AutoTokenizer.from_pretrained('microsoft/DialoGPT-small')
+        self.tokenizer = AutoTokenizer.from_pretrained(self.base_model)
 
         # Projection layer
         victim_emb_dim = self.victim_model.get_sentence_embedding_dimension()
@@ -50,7 +108,7 @@ class TEIAQuerySystem:
         self.projection = LinearProjection(in_num=victim_emb_dim, out_num=hidden_dim).to(self.device)
 
         # Load trained weights
-        model_dir = Path(self.exp_name) / "8000" / str(self.model_step)
+        model_dir = Path(self.exp_name) / "32000" / str(self.model_step)
 
         attack_model_path = model_dir / "attacler_qnli_sbert_gtr-base"
         if attack_model_path.exists():
@@ -65,7 +123,7 @@ class TEIAQuerySystem:
                 print(f"⚠️  Could not load TEIA model: {e}")
                 print("📋 Using base DialoGPT model")
                 self.attack_model = AutoModelForCausalLM.from_pretrained(
-                    'microsoft/DialoGPT-small'
+                    'microsoft/DialoGPT-medium'
                 ).to(self.device)
         else:
             print(f"⚠️  Warning: Could not find attack model at {attack_model_path}")
@@ -84,25 +142,6 @@ class TEIAQuerySystem:
         self.models_loaded = True
 
         print(f"🎯 Ready! Using final model (step {self.model_step}, epoch {(self.model_step + 1) * 2}) on {self.device}")
-
-    def show_training_examples(self, num_examples: int = 5):
-        result_file = Path(f"{self.exp_name}/0.1_{self.model_step}.log")
-        if not result_file.exists():
-            print(f"❌ Could not find result file: {result_file}")
-            return
-
-        print(f"🔍 Loading results from epoch {(self.model_step + 1) * 2}...")
-        with open(result_file, 'r') as f:
-            data = json.load(f)
-
-        gt_sentences = data['gt'][:num_examples]
-        pred_sentences = data['pred'][:num_examples]
-
-        print(f"\n📊 Showing {num_examples} examples:")
-        print("=" * 60)
-        for i, (gt, pred) in enumerate(zip(gt_sentences, pred_sentences), 1):
-            print(f"[{i}] Original: {gt}")
-            print(f"    Inverted: {pred}")
 
     def embed_sentence(self, sentence: str):
         embedding = self.victim_model.encode([sentence], convert_to_tensor=True)
@@ -157,16 +196,13 @@ class TEIAQuerySystem:
     def interactive_mode(self):
         print("\n🚀 TEIA Interactive Query Mode")
         print("=" * 60)
-        print("Commands: 'examples' | 'quit'\n")
+        print("Commands: 'quit'\n")
         while True:
             try:
                 user_input = input("\n💬 Enter sentence: ").strip()
                 if user_input.lower() in ['quit', 'exit', 'q']:
                     print("👋 Goodbye!")
                     break
-                if user_input.lower() in ['examples', 'ex']:
-                    self.show_training_examples()
-                    continue
                 if not user_input:
                     print("⚠️ Please enter a sentence.")
                     continue
@@ -184,7 +220,10 @@ class TEIAQuerySystem:
 
 
 def main():
-    system = TEIAQuerySystem("full_run_1")  # Uses default model_step=11 (final model)
+    # The active model is configured at the top of this file in ACTIVE_MODEL
+    # To switch models, change ACTIVE_MODEL or pass a different config name
+    system = TEIAQuerySystem()  # Uses ACTIVE_MODEL by default
+    # system = TEIAQuerySystem("old_small")  # Uncomment to use old model
     system.interactive_mode()
 
 
